@@ -1,0 +1,15 @@
+[project]
+name = "yoda-speak"
+version = "0.1.0"
+description = "CLI tool that transforms text into Yoda-like speech patterns"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+yoda = "yoda_speak.cli:main"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.12.8",
+]
