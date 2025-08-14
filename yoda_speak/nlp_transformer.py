@@ -1,4 +1,4 @@
-"""Advanced Yoda speech transformation using NLP."""
+"""Advanced Yoda speech transformation using NLP - Simplified approach."""
 
 import re
 from typing import Optional
@@ -58,152 +58,223 @@ class NLPYodaTransformer:
         # Parse with spaCy
         doc = self.nlp(clean_sentence)
 
-        # Try different transformation strategies
-        transformed = self._try_subject_predicate_inversion(doc)
+        # Try specific patterns based on sentence structure
+        transformed = self._yoda_transform(doc)
+
         if transformed != clean_sentence:
             return self._capitalize_first(transformed) + punctuation
 
-        transformed = self._try_object_fronting(doc)
-        if transformed != clean_sentence:
-            return self._capitalize_first(transformed) + punctuation
-
-        transformed = self._try_verb_phrase_inversion(doc)
-        if transformed != clean_sentence:
-            return self._capitalize_first(transformed) + punctuation
-
-        # Fallback to simple word reversal for very short sentences
-        if len(doc) <= 6:
+        # Fallback to simple word reversal for very short sentences (≤4 words)
+        if len(doc) <= 4:
             words = [token.text for token in doc]
             reversed_words = words[::-1]
             result = " ".join(reversed_words)
             return self._capitalize_first(result) + punctuation
 
-        # Return original with proper capitalization
+        # Return original with proper capitalization if no transformation worked
         return self._capitalize_first(clean_sentence) + punctuation
 
-    def _try_subject_predicate_inversion(self, doc: Doc) -> str:
-        """Try to invert subject and predicate: 'You are strong' -> 'Strong you are'."""
-        # Find subject and main verb
-        subject = self._find_subject(doc)
-        main_verb = self._find_main_verb(doc)
-
-        if not subject or not main_verb:
+    def _yoda_transform(self, doc: Doc) -> str:
+        """Main Yoda transformation logic."""
+        if len(doc) == 0:
             return doc.text
 
-        # Look for predicate adjectives or objects
-        predicate_parts = []
+        # Find key sentence components
+        subject = self._find_subject(doc)
+        root_verb = self._find_root_verb(doc)
+
+        # Pattern 1: "You/I are/am ADJECTIVE" -> "ADJECTIVE you/I are/am"
+        if self._is_copula_with_adjective(doc, subject, root_verb):
+            return self._transform_copula_adjective(doc, subject, root_verb)
+
+        # Pattern 2: "You/I VERB OBJECT" -> "VERB OBJECT you/I"
+        if self._has_direct_object(doc, subject, root_verb):
+            return self._transform_with_object(doc, subject, root_verb)
+
+        # Pattern 3: "You/I will/can/must VERB" -> "VERB you/I will/can/must"
+        if self._has_modal_auxiliary(doc, subject, root_verb):
+            return self._transform_modal_construction(doc, subject, root_verb)
+
+        # No specific pattern matched
+        return doc.text
+
+    def _is_copula_with_adjective(
+        self, doc: Doc, subject: Optional[Token], root_verb: Optional[Token]
+    ) -> bool:
+        """Check if this is a 'X is/are ADJECTIVE' pattern."""
+        if not root_verb or not subject:
+            return False
+        if root_verb.lemma_ != "be":
+            return False
+        # Look for adjectives or predicates after the verb
         for token in doc:
-            # Skip the subject and verb
-            if token == subject or token == main_verb:
+            if (
+                token.i > root_verb.i
+                and token.pos_ in ["ADJ"]
+                or token.dep_ in ["acomp", "attr"]
+            ):
+                return True
+        return False
+
+    def _transform_copula_adjective(
+        self, doc: Doc, subject: Optional[Token], root_verb: Optional[Token]
+    ) -> str:
+        """Transform 'You are strong' -> 'Strong you are'."""
+        if not subject or not root_verb:
+            return doc.text
+
+        # Collect all tokens
+        subject_phrase = []  # Subject and its modifiers
+        verb_phrase = []  # The copula and auxiliaries
+        predicate = []  # Adjectives, predicates after the verb
+        other = []  # Everything else (determiners, etc.)
+
+        for token in doc:
+            if token == subject:
+                subject_phrase.append(token.text)
+            elif token == root_verb or (
+                token.dep_ == "aux" and token.head == root_verb
+            ):
+                verb_phrase.append(token.text)
+            elif token.i > root_verb.i and (
+                token.pos_ == "ADJ" or token.dep_ in ["acomp", "attr", "pobj"]
+            ):
+                predicate.append(token.text)
+            elif token.dep_ == "det" and any(
+                t.head == token for t in doc if t.dep_ in ["acomp", "attr", "pobj"]
+            ):
+                predicate.append(token.text)  # Determiners that modify predicate nouns
+            elif token.i < subject.i:
+                other.append(token.text)
+
+        if predicate:
+            # Reorder: [other] predicate subject verb
+            result_parts = []
+            if other:
+                result_parts.extend(other)
+            result_parts.extend(predicate)
+            result_parts.extend(subject_phrase)
+            result_parts.extend(verb_phrase)
+            return " ".join(result_parts)
+
+        return doc.text
+
+    def _has_direct_object(
+        self, doc: Doc, subject: Optional[Token], root_verb: Optional[Token]
+    ) -> bool:
+        """Check if sentence has a direct object."""
+        if not root_verb:
+            return False
+        for token in doc:
+            if token.dep_ == "dobj" and token.head == root_verb:
+                return True
+        return False
+
+    def _transform_with_object(
+        self, doc: Doc, subject: Optional[Token], root_verb: Optional[Token]
+    ) -> str:
+        """Transform 'I love you' -> 'Love you I' or 'I will help you' -> 'Help you I will'."""
+        if not subject or not root_verb:
+            return doc.text
+
+        # Find direct object
+        direct_object = None
+        for token in doc:
+            if token.dep_ == "dobj" and token.head == root_verb:
+                direct_object = token
+                break
+
+        if not direct_object:
+            return doc.text
+
+        # Collect components
+        subject_tokens = [subject.text]
+        verb_tokens = [root_verb.text]
+        object_tokens = [direct_object.text]
+        aux_tokens = []
+        other_tokens = []
+
+        for token in doc:
+            if token in [subject, root_verb, direct_object]:
                 continue
+            elif token.dep_ == "aux" and token.head == root_verb:
+                aux_tokens.append(token.text)
+            elif token.i < subject.i:  # Before subject
+                other_tokens.append(token.text)
 
-            # Collect predicate adjectives, objects, and complements
-            if token.dep_ in ["attr", "acomp", "dobj", "pobj"] or token.pos_ == "ADJ":
-                # Include the token and its children (modifiers)
-                predicate_parts.extend(self._get_token_with_children(token, doc))
+        # Reorder: [other] verb object subject aux
+        result_parts = []
+        if other_tokens:
+            result_parts.extend(other_tokens)
+        result_parts.extend(verb_tokens)
+        result_parts.extend(object_tokens)
+        result_parts.extend(subject_tokens)
+        if aux_tokens:
+            result_parts.extend(aux_tokens)
 
-        if predicate_parts:
-            # Remove duplicates while preserving order
-            predicate_parts = list(dict.fromkeys(predicate_parts))
-            predicate_text = " ".join(predicate_parts)
+        return " ".join(result_parts)
 
-            # Reconstruct: predicate + subject + verb
-            subject_text = subject.text
-            verb_text = main_verb.text
+    def _has_modal_auxiliary(
+        self, doc: Doc, subject: Optional[Token], root_verb: Optional[Token]
+    ) -> bool:
+        """Check if sentence has modal auxiliary (will, can, must, etc.)."""
+        if not root_verb:
+            return False
+        for token in doc:
+            if (
+                token.dep_ == "aux"
+                and token.head == root_verb
+                and token.lemma_ in ["will", "can", "must", "should", "could", "would"]
+            ):
+                return True
+        return False
 
-            return f"{predicate_text} {subject_text} {verb_text}"
-
-        return doc.text
-
-    def _try_object_fronting(self, doc: Doc) -> str:
-        """Try to front direct objects: 'I will help you' -> 'Help you I will'."""
-        # Find subject, verb, and object
-        subject = self._find_subject(doc)
-        main_verb = self._find_main_verb(doc)
-        direct_object = self._find_direct_object(doc)
-
-        if not all([subject, main_verb, direct_object]):
+    def _transform_modal_construction(
+        self, doc: Doc, subject: Optional[Token], root_verb: Optional[Token]
+    ) -> str:
+        """Transform 'You will learn' -> 'Learn you will'."""
+        if not subject or not root_verb:
             return doc.text
 
-        # Look for auxiliary verbs
-        aux_verbs = []
+        # Find modal auxiliary
+        modal = None
         for token in doc:
-            if token.dep_ == "aux" and token.head == main_verb:
-                aux_verbs.append(token.text)
+            if (
+                token.dep_ == "aux"
+                and token.head == root_verb
+                and token.lemma_ in ["will", "can", "must", "should", "could", "would"]
+            ):
+                modal = token
+                break
 
-        # Construct: verb + object + subject + aux
-        verb_phrase = main_verb.text
-        object_text = direct_object.text
-        subject_text = subject.text
-        aux_text = " ".join(aux_verbs)
-
-        if aux_text:
-            return f"{verb_phrase} {object_text} {subject_text} {aux_text}"
-        else:
-            return f"{verb_phrase} {object_text} {subject_text}"
-
-    def _try_verb_phrase_inversion(self, doc: Doc) -> str:
-        """Try to invert verb phrases: 'You will learn' -> 'Learn you will'."""
-        subject = self._find_subject(doc)
-        main_verb = self._find_main_verb(doc)
-
-        if not subject or not main_verb:
+        if not modal:
             return doc.text
 
-        # Find auxiliary verbs
-        aux_verbs = []
+        # Simple reorder: verb subject modal [other]
+        other_tokens = []
         for token in doc:
-            if token.dep_ == "aux" and token.head == main_verb:
-                aux_verbs.append(token.text)
+            if token not in [subject, root_verb, modal]:
+                other_tokens.append(token.text)
 
-        if aux_verbs:
-            # Construct: main_verb + subject + aux_verbs
-            subject_text = subject.text
-            verb_text = main_verb.text
-            aux_text = " ".join(aux_verbs)
-            return f"{verb_text} {subject_text} {aux_text}"
+        result_parts = [root_verb.text, subject.text, modal.text]
+        if other_tokens:
+            result_parts.extend(other_tokens)
 
-        return doc.text
+        return " ".join(result_parts)
 
     def _find_subject(self, doc: Doc) -> Optional[Token]:
         """Find the main subject of the sentence."""
         for token in doc:
-            if token.dep_ in ["nsubj", "nsubjpass", "csubj"]:
+            if token.dep_ in ["nsubj", "nsubjpass"]:
                 return token
         return None
 
-    def _find_main_verb(self, doc: Doc) -> Optional[Token]:
-        """Find the main verb (root) of the sentence."""
+    def _find_root_verb(self, doc: Doc) -> Optional[Token]:
+        """Find the root verb of the sentence."""
         for token in doc:
-            if token.dep_ == "ROOT" and token.pos_ in ["VERB", "AUX"]:
+            if token.dep_ == "ROOT":
                 return token
         return None
-
-    def _find_direct_object(self, doc: Doc) -> Optional[Token]:
-        """Find the direct object of the sentence."""
-        for token in doc:
-            if token.dep_ == "dobj":
-                return token
-        return None
-
-    def _get_token_with_children(self, token: Token, doc: Doc) -> list[str]:
-        """Get token text along with its modifier children."""
-        result = []
-
-        # Add modifiers that come before
-        for child in token.children:
-            if child.dep_ in ["amod", "det", "advmod"] and child.i < token.i:
-                result.append(child.text)
-
-        # Add the token itself
-        result.append(token.text)
-
-        # Add modifiers that come after
-        for child in token.children:
-            if child.dep_ in ["amod", "det", "advmod"] and child.i > token.i:
-                result.append(child.text)
-
-        return result
 
     def _capitalize_first(self, text: str) -> str:
         """Capitalize the first letter of the text."""
