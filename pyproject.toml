@@ -4,7 +4,10 @@ version = "0.1.0"
 description = "CLI tool that transforms text into Yoda-like speech patterns"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "en-core-web-sm",
+    "spacy>=3.8.7",
+]
 
 [project.scripts]
 yoda = "yoda_speak.cli:main"
@@ -13,3 +16,6 @@ yoda = "yoda_speak.cli:main"
 dev = [
     "ruff>=0.12.8",
 ]
+
+[tool.uv.sources]
+en-core-web-sm = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" }

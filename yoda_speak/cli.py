@@ -3,6 +3,7 @@
 import sys
 from typing import NoReturn
 
+from .nlp_transformer import NLPYodaTransformer
 from .transformer import YodaTransformer
 
 
@@ -30,8 +31,18 @@ class YodaCLI:
     """Command line interface for Yoda speech transformation."""
 
     def __init__(self) -> None:
-        """Initialize the CLI with a transformer."""
-        self.transformer = YodaTransformer()
+        """Initialize the CLI with transformers (NLP primary, regex fallback)."""
+        try:
+            self.transformer = NLPYodaTransformer()
+            self.fallback_transformer = YodaTransformer()
+            self.use_nlp = True
+            print("🧠 Enhanced NLP mode activated!")
+        except RuntimeError as e:
+            print(f"⚠️  NLP mode unavailable: {e}")
+            print("📝 Falling back to regex-based transformation")
+            self.transformer = YodaTransformer()
+            self.fallback_transformer = None
+            self.use_nlp = False
 
     def show_greeting(self) -> None:
         """Display the Yoda ASCII art and greeting."""
@@ -64,7 +75,23 @@ class YodaCLI:
 
     def transform_single(self, text: str) -> str:
         """Transform a single text input and return the result."""
-        return self.transformer.transform_text(text)
+        try:
+            result = self.transformer.transform_text(text)
+            # If NLP gives same result as input and we have fallback, try fallback
+            if (
+                self.use_nlp
+                and self.fallback_transformer
+                and result.lower().strip() == text.lower().strip()
+            ):
+                fallback_result = self.fallback_transformer.transform_text(text)
+                if fallback_result.lower().strip() != text.lower().strip():
+                    return fallback_result
+            return result
+        except Exception:
+            # If NLP fails, use fallback
+            if self.fallback_transformer:
+                return self.fallback_transformer.transform_text(text)
+            return text
 
 
 def main() -> NoReturn:
